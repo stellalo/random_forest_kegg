@@ -1,0 +1,134 @@
+---
+title: "RF_temp at 37"
+output: html_document
+date: "2023-05-06"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(reshape2)
+library(dplyr)
+library(tidyverse)
+library(randomForest)
+library(caret)
+```
+
+# RF without tuning
+```{r Random Forest for Temoerature at 37}
+#read Kegg_cai file that holds all of the tAI values (the codon optimization values) and the kegg annotations (saved in the KEGG column)
+kegg <- read.delim("etAI_kegg_wide.txt",sep = "\t",header = T)
+
+#Remove cols with 80% NAs
+# Calculate proportion of NAs in each column
+na_proportion <- colMeans(is.na(kegg))
+# Subset data frame to columns with less than 80% NAs
+kegg <- kegg[, na_proportion < 0.8]
+
+#Change NA to 0
+kegg <- kegg %>% replace(is.na(.), 0)
+
+#read the environment data
+env <- read.delim("thirtyseven_data.txt",header = T)
+
+#Combine data files
+comb_mat <- full_join(kegg, env,by = c("spec" = "assembly_fullID_updated"))
+
+#Remove data with temp = NA
+comb_mat <- comb_mat[complete.cases(comb_mat$X37_EVIDENCE), ]
+
+#Remove rows that are all NA but has temp value
+# select rows with complete data except the last column
+comb_mat <- comb_mat[complete.cases(comb_mat[,-ncol(comb_mat)]), ]
+
+#make spec the row name
+rownames(comb_mat) <- comb_mat$spec
+comb_mat <- comb_mat[,-c(1)]
+
+#set the category to a special item called a "factor"
+comb_mat$X37_EVIDENCE <- as.character(comb_mat$X37_EVIDENCE)
+comb_mat$X37_EVIDENCE <- as.factor(comb_mat$X37_EVIDENCE)
+
+#Run RF
+set.seed(120)
+ind <- sample(2, nrow(comb_mat), replace = TRUE, prob = c(0.7, 0.3))
+train <- comb_mat[ind==1,]
+test <- comb_mat[ind==2,]
+
+rf <- randomForest(X37_EVIDENCE~., data=train, proximity=TRUE, importance=TRUE)
+
+rf_conf<-rf$confusion
+print(rf_conf)
+write.table(rf_conf, file="rf_conf_temp")
+write.table(rf$predicted, file="rf_predict_TEMP.txt")
+
+plot(rf)
+p1 <- predict(rf, train)
+p1.cm<-confusionMatrix(p1, train$X37_EVIDENCE)
+View(p1.cm$byClass)
+
+p2 <- predict(rf, test)
+p2.cm<-confusionMatrix(p2, test$ X37_EVIDENCE)
+View(p2.cm$byClass)
+write.table(p2.cm$table, file="p2.cm.temp.txt")
+
+
+hist(treesize(rf),
+     main = "No. of Nodes for the Trees",
+     col = "green")
+#Variable Importance
+varImpPlot(rf,
+           sort = T,
+           n.var = 10,
+           main = "Top 10 - Variable Importance")
+
+#this is the "relative importance" of our input values
+this_importance<-rf$importance
+```
+
+# RF with undersampling to balance data set
+
+```{r}
+# Balance the dataset using the downSample function
+data_balanced <- downSample(x = comb_mat[, -1], y = comb_mat$X37_EVIDENCE)
+
+#extra col "Class" is generated after downSample(), remove the last col $Class
+data_balanced <- data_balanced[, -ncol(data_balanced)]
+
+# use createDataPartition to split the balanced data into training and testing datasets
+# set seed for reproducibility
+set.seed(123) 
+train_index <- createDataPartition(data_balanced$X37_EVIDENCE, p = 0.7, list = FALSE)
+train_balanced <- data_balanced[train_index, ]
+test_balanced <- data_balanced[-train_index, ]
+
+# Train the random forest classifier on the balanced training set
+rf_balanced <- randomForest(X37_EVIDENCE~., data=train_balanced, proximity=TRUE, importance=TRUE)
+
+rf_balanced_conf<-rf_balanced$confusion
+print(rf_balanced_conf)
+write.table(rf_balanced_conf, file="rf_balanced_conf_temp")
+write.table(rf_balanced$predicted, file="rf_balanced_predict_TEMP.txt")
+
+plot(rf_balanced)
+p1_balanced <- predict(rf_balanced, train_balanced)
+p1.cm<-confusionMatrix(p1_balanced, train_balanced$X37_EVIDENCE)
+View(p1.cm$byClass)
+
+p2_balanced <- predict(rf_balanced, test)
+p2.cm<-confusionMatrix(p2_balanced, test$ X37_EVIDENCE)
+View(p2.cm$byClass)
+write.table(p2.cm$table, file="p2.cm.temp.txt")
+
+hist(treesize(rf_balanced),
+     main = "No. of Nodes for the Trees",
+     col = "green")
+#Variable Importance
+varImpPlot(rf_balanced,
+           sort = T,
+           n.var = 10,
+           main = "Top 10 - Variable Importance")
+
+#this is the "relative importance" of our input values
+this_importance<-rf_balanced$importance
+```
+

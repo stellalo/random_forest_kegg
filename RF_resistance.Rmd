@@ -1,0 +1,205 @@
+---
+title: "RF_resistance"
+output: html_document
+date: "2023-07-23"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(reshape2)
+library(dplyr)
+library(tidyverse)
+library(randomForest)
+library(caret)
+library(ranger)
+```
+
+# Prepare dataframe
+```{r}
+#read Kegg_cai file that holds all of the tAI values (the codon optimization values) and the kegg annotations (saved in the KEGG column)
+kegg <- read.delim("etAI_kegg_wide.txt",sep = "\t",header = T)
+# Calculate proportion of NAs in each column
+na_proportion <- colMeans(is.na(kegg))
+# Subset data frame to columns with less than 80% NAs
+kegg <- kegg[, na_proportion < 0.8]
+#Change NA to 0
+kegg <- kegg %>% replace(is.na(.), 0)
+#read the environment data
+env <- read.delim("resistance.txt",header = T)
+#last resistance
+env_10 <- env[,c(1,11)]
+#Combine data files
+comb_mat <- full_join(kegg, env_10,by = c("spec" = "assembly_fullID_updated"))
+#Remove data with resistance = NA
+comb_mat <- comb_mat[complete.cases(comb_mat$Resistant_to_5FC__one_azole__Amp_B___Terbinafin), ]
+#Remove rows that are all NA but has resistance value
+# select rows with complete data except the last column
+comb_mat <- comb_mat[complete.cases(comb_mat[,-ncol(comb_mat)]), ]
+#make spec the row name
+rownames(comb_mat) <- comb_mat$spec
+comb_mat <- comb_mat[,-c(1)]
+#set the category to a special item called a "factor"
+comb_mat$Resistant_to_5FC__one_azole__Amp_B___Terbinafin <- as.character(comb_mat$Resistant_to_5FC__one_azole__Amp_B___Terbinafin)
+comb_mat$Resistant_to_5FC__one_azole__Amp_B___Terbinafin <- as.factor(comb_mat$Resistant_to_5FC__one_azole__Amp_B___Terbinafin)
+```
+
+
+# Create empty data frames to store values
+```{r}
+#Create another data frame to compare misclassification later
+misclassify <- comb_mat[,ncol(comb_mat) , drop = FALSE]
+#Add a col called misclassify in misclassify
+misclassify$misclassify <- 0
+species <- rownames(misclassify)
+rownames(misclassify) <- NULL
+misclassify_train <- cbind(species, misclassify)
+misclassify_test <- cbind(species, misclassify)
+#Create empty data frames for contingency data
+#Create empty data frame with set row names for training set
+training_contingency <- data.frame(Seed = numeric(),`(0,0)` = numeric(),`(0,1)` = numeric(),errRate_1 = numeric(),`(1,0)` = numeric(),`(1,1)` = numeric(),errRate_2 = numeric(),stringsAsFactors = FALSE)
+#Create empty data frame with set row names for testing set
+#testing_contigency <- data.frame(Seed = numeric(),`(0,0)` = numeric(),`(0,1)` = numeric(),`(1,0)` = numeric(),`(1,1)` = numeric(),stringsAsFactors = FALSE)
+testing_contingency <- data.frame(Seed = numeric(),`(0,0)` = numeric(),`(0,1)` = numeric(),errRate_1 = numeric(),`(1,0)` = numeric(),`(1,1)` = numeric(),errRate_2 = numeric(),stringsAsFactors = FALSE)
+#Create empty data frame to store RI KEGGs
+#Get the column names except the last column name from comb_mat
+selected_row_names <- colnames(comb_mat)[-ncol(comb_mat)]
+#Create a data frame with row names
+accuracy <- data.frame(row.names = selected_row_names)
+gini <- data.frame(row.names = selected_row_names)
+```
+
+# Loop through 100 seeds
+```{r}
+#generate a vector that stores used seeds to avoid repeated seed values
+used_seeds <- c()
+for(j in 1:100){
+  #Generate a random seed value
+  repeat {
+  seed <- sample(1:1000, 1)
+  if (!(seed %in% used_seeds)) {
+    used_seeds <- c(used_seeds, seed)
+    break
+   }
+  }
+  # Set the seed
+  set.seed(seed)
+  
+  # Balance the dataset using the downSample function
+  data_balanced <- downSample(x = comb_mat, y = comb_mat$Resistant_to_5FC__one_azole__Amp_B___Terbinafin)
+  #extra col "Class" is generated after downSample(), remove the last col $Class
+  data_balanced <- data_balanced[, -ncol(data_balanced)]
+  # row name disappeared after downsampling, add back the row names
+  rownames(data_balanced) <- rownames(comb_mat)[as.numeric(rownames(data_balanced))]
+  
+  # use createDataPartition to split the balanced data into training and testing datasets
+  train_index <- createDataPartition(data_balanced$Resistant_to_5FC__one_azole__Amp_B___Terbinafin, p = 0.7, list = FALSE)
+  train_balanced <- data_balanced[train_index, ]
+  test_balanced <- data_balanced[-train_index, ]
+  
+  rf <-tuneRF(train_balanced[, -ncol(train_balanced)], train_balanced$Resistant_to_5FC__one_azole__Amp_B___Terbinafin, ntreeTry = 500, stepFactor = 1.5, improve = 0.01, trace = FALSE, plot = FALSE,doBest = TRUE,proximity=TRUE, importance=TRUE)
+ 
+  #Contingency table: training set
+  rf_conf<-rf$confusion
+  #Create a temporary data frame for the current iteration
+  temp_df_train <- data.frame(Seed = seed, `(0,0)` = rf_conf[1,1], `(0,1)` = rf_conf[1,2],errRate_1 = rf_conf[1,3], `(1,0)` = rf_conf[2,1],`(1,1)` = rf_conf[2,2], errRate_2 = rf_conf[2,3], stringsAsFactors = FALSE)
+  #Concatenate the temporary data frame to the existing data frame
+  training_contingency <- rbind(training_contingency, temp_df_train)
+  
+  #Contingency table: testing set
+  testing_predict <- predict(rf, test_balanced)
+  testing.cm<-confusionMatrix(testing_predict, test_balanced$Resistant_to_5FC__one_azole__Amp_B___Terbinafin)
+  #Create a temporary data frame for the current iteration
+  temp_df_test <- data.frame(Seed = seed, `(0,0)` = testing.cm$table[1,1], `(0,1)` = testing.cm$table[1,2], errRate_1 = testing.cm$table[1,2]/(testing.cm$table[1,1]+testing.cm$table[1,2]), `(1,0)` = testing.cm$table[2,1],`(1,1)` = testing.cm$table[2,2], errRate_2 = testing.cm$table[2,1]/(testing.cm$table[2,1]+testing.cm$table[2,2]), stringsAsFactors = FALSE)
+  #Concatenate the temporary data frame to the existing data frame
+  testing_contingency <- rbind(testing_contingency, temp_df_test)
+  
+  #Misclassified species (TRAINING)
+  results_predicted <- data.frame(predicted = rf$predicted)
+  #Make row names a column
+  species <- rownames(results_predicted)
+  row.names(results_predicted) <- NULL
+  results_predicted <- cbind(species,results_predicted)
+  #Merge the 2 data frames so that they have equal number of rows
+  misclassify_temp_train <- merge(misclassify_train,results_predicted,all.x = TRUE) 
+  misclassify_train$predicted <- misclassify_temp_train$predicted
+  not_equal <- misclassify_train$Resistant_to_5FC__one_azole__Amp_B___Terbinafin != misclassify_train$predicted
+  #Replace all NAs in vector to FALSE
+  not_equal[is.na(not_equal)] <- FALSE
+  misclassify_train$misclassify[not_equal] <- misclassify_train$misclassify[not_equal] + 1
+  
+   #Misclassified species (TESTING)
+  results_predicted_test <- data.frame(predicted = testing_predict)
+  #Make row names a column
+  species <- rownames(results_predicted_test)
+  row.names(results_predicted_test) <- NULL
+  results_predicted_test <- cbind(species,results_predicted_test)
+  #Merge the 2 data frames so that they have equal number of rows
+  misclassify_temp_test <- merge(misclassify_test,results_predicted_test,all.x = TRUE) 
+  misclassify_test$predicted <- misclassify_temp_test$predicted
+  not_equal <- misclassify_test$Resistant_to_5FC__one_azole__Amp_B___Terbinafin != misclassify_test$predicted
+  #Replace all NAs in vector to FALSE
+  not_equal[is.na(not_equal)] <- FALSE
+  misclassify_test$misclassify[not_equal] <- misclassify_test$misclassify[not_equal] + 1
+  
+  #Relative Importance of all KEGGs
+  this_importance<-rf$importance
+  
+  #Subset the data frame with all rows and the "MeanDecreaseAccuracy" column
+  accuracy_df <- as.data.frame(this_importance[, "MeanDecreaseAccuracy", drop = FALSE])
+  #Rename the column name of accuracy_df
+  colnames(accuracy_df) <- as.character(seed)
+  accuracy <- cbind(accuracy, accuracy_df)
+
+  # Subset the data frame with all rows and the "MeanDecreaseGini" column
+  gini_df <- as.data.frame(this_importance[, "MeanDecreaseGini", drop = FALSE])
+  #Rename the column name of gini_df
+  colnames(gini_df) <- as.character(seed)
+  gini <- cbind(gini, gini_df)
+  
+  #Reset data
+  misclassify_train <- misclassify_train[,-c(ncol(misclassify_train))]
+  misclassify_test <- misclassify_test[,-c(ncol(misclassify_test))]
+}
+```
+
+# Export data files
+```{r}
+#Make Seed value row name for test + train contingency data outside of loop
+rownames(training_contingency) <- training_contingency$Seed
+training_contingency <- training_contingency[,-c(1)]
+rownames(testing_contingency) <- testing_contingency$Seed
+testing_contingency <- testing_contingency[,-c(1)]
+#Last column: add average error rate for training & testing contingency
+training_contingency$MeanErr <- (training_contingency$errRate_1 + training_contingency$errRate_2)/2
+testing_contingency$MeanErr <- (testing_contingency$errRate_1 + testing_contingency$errRate_2)/2
+#write table for contingency table (test + train) outside of loop
+write.table(training_contingency, file="training_contingency_resistance_10.txt")
+write.table(testing_contingency, file="testing_contingency_resistance_10.txt")
+
+#make species the row names for misclassify
+rownames(misclassify_train) <- misclassify_train$species
+rownames(misclassify_test) <- misclassify_test$species
+misclassify_train <- misclassify_train[,-c(1)]
+misclassify_test <- misclassify_test[,-c(1)]
+#sort the misclassify species
+sort_indices_train <- order(misclassify_train[, "misclassify"], decreasing = TRUE)
+sorted_train <- misclassify_train[sort_indices_train,]
+write.table(sorted_train, file="Misclassify_train_resistance_10.txt")
+sort_indices_test <- order(misclassify_test[, "misclassify"], decreasing = TRUE)
+sorted_test <- misclassify_test[sort_indices_test,]
+write.table(sorted_test, file="Misclassify_test_resistance_10.txt")
+
+#Calculate the mean of each row (KEGGs) for accuracy and gini
+accuracy$Mean <- rowMeans(accuracy)
+gini$Mean <- rowMeans(gini)
+#Sort the data based on the sort indices
+sort_indices_accuracy <- order(accuracy[, "Mean"], decreasing = TRUE)
+sort_indices_gini <- order(gini[, "Mean"], decreasing = TRUE)
+#Get the indices to sort the data based on Mean
+sorted_accuracy <- accuracy[sort_indices_accuracy,]
+sorted_gini <- gini[sort_indices_gini,]
+#Write table for accuracy and gini
+write.table(sorted_accuracy, file="MeanDecreaseAccuracy_resistance_10.txt")
+write.table(sorted_gini, file="MeanDecreaseGini_resistance_10.txt")
+```
+

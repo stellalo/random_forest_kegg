@@ -1,0 +1,82 @@
+---
+title: "KEGG_leave_out"
+output: html_document
+date: "2023-06-04"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(reshape2)
+library(dplyr)
+library(tidyverse)
+library(randomForest)
+library(caret)
+library(ranger)
+```
+
+```{r}
+#Prepare data frame
+kegg <- read.delim("etAI_kegg_wide.txt",sep = "\t",header = T)
+na_proportion <- colMeans(is.na(kegg))
+kegg <- kegg[, na_proportion < 0.8]
+kegg <- kegg %>% replace(is.na(.), 0)
+env <- read.delim("thirtyseven_data.txt",header = T)
+comb_mat <- full_join(kegg, env,by = c("spec" = "assembly_fullID_updated"))
+comb_mat <- comb_mat[complete.cases(comb_mat$X37_EVIDENCE), ]
+comb_mat <- comb_mat[complete.cases(comb_mat[,-ncol(comb_mat)]), ]
+rownames(comb_mat) <- comb_mat$spec
+comb_mat <- comb_mat[,-c(1)]
+comb_mat$X37_EVIDENCE <- as.character(comb_mat$X37_EVIDENCE)
+comb_mat$X37_EVIDENCE <- as.factor(comb_mat$X37_EVIDENCE)
+```
+
+```{r}
+#Set seed
+set.seed(230)
+#data frame to store KEGGs
+KEGG_left_out <- data.frame()
+#data frame to store all oobs (mean)
+all_mean_oob <- data.frame()
+#set variable to 0
+oob <- 0
+# Balance the dataset using the downSample function
+data_balanced <- downSample(x = comb_mat, y = comb_mat$X37_EVIDENCE)
+#extra col "Class" is generated after downSample(), remove the last col $Class
+data_balanced <- data_balanced[, -ncol(data_balanced)]
+# row name disappeared after downsampling, add back the row names
+rownames(data_balanced) <- rownames(comb_mat)[as.numeric(rownames(data_balanced))]
+# use createDataPartition to split the balanced data into training and testing datasets
+train_index <- createDataPartition(data_balanced$X37_EVIDENCE, p = 0.7, list = FALSE)
+train_balanced <- data_balanced[train_index, ]
+test_balanced <- data_balanced[-train_index, ]
+#Loop until OOB >= 0.5
+while (oob < 0.50){
+  #run RF
+  rf <- randomForest(X37_EVIDENCE~., data=train_balanced, proximity=TRUE, importance=TRUE)
+  #rf <-tuneRF(train_balanced[, -ncol(train_balanced)], train_balanced$X37_EVIDENCE, ntreeTry = 500, stepFactor = 1.5, improve = 0.01, trace = FALSE, plot = FALSE,doBest = TRUE,proximity=TRUE, importance=TRUE)
+  
+  #Relative Importance of all KEGGs (MeanDecreaseAccuracy)
+  this_importance<-rf$importance
+  sort_indices <- order(this_importance[, "MeanDecreaseAccuracy"], decreasing = TRUE)
+  sorted_KEGG <- this_importance[sort_indices,]
+  
+  #remove the most important KEGG from data frame (use Accuracy) and concatenate it to Kegg_left_out
+  KEGG_left_out <- rbind(KEGG_left_out, rownames(sorted_KEGG)[1])
+  
+  #remove that most importance KEGG from data frame
+  train_balanced <- train_balanced[,!colnames(train_balanced) == rownames(sorted_KEGG)[1]]
+  test_balanced <- test_balanced[,!colnames(test_balanced) == rownames(sorted_KEGG)[1]]
+  #reset variable OOB
+  rf_conf<-rf$confusion
+  oob <- mean(rf_conf[1,3],rf_conf[2,3])
+  #store oob
+  all_mean_oob <- rbind(all_mean_oob,oob)
+}
+#remove col name of KEGG_left_out and all_mean_oob
+colnames(KEGG_left_out) <- NULL 
+colnames(all_mean_oob) <- NULL 
+#export files
+write.table(KEGG_left_out, file="KEGG_left_out.txt")
+write.table(all_mean_oob, file="oob.txt")
+```
+

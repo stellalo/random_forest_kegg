@@ -1,7 +1,7 @@
 <h1>Random Forest Kegg Analysis Scripts</h1>
 
 <h2>👩🏻‍💻 Description</h2>
-This repository contains scripts that analyze 3177 KEGG gene expression data of 1154 yeast species using ML algorithm Random Forest in R Markdown. The objective of this project is to identify the KEGGs that have the highest possiblity of predicting pathogenic yeast using different characteristics such as survival at temperature 37 Celcius and resistance to 9 anti-fungal treatments.
+This repository contains scripts that analyze 3177 KEGG gene expression data of 1154 yeast species using ML algorithm Random Forest in R Markdown. The objective of this project is to identify the KEGGs that have the highest possibility of predicting pathogenic yeast using different characteristics such as survival at temperature 37 Celsius and resistance to 9 anti-fungal treatments.
 <br />
 
 <h2>🪐 Language and Packages</h2>
@@ -19,11 +19,11 @@ library(ranger)
 ```
 
 <h2>🦠 RF_temp.Rmd Walk-Through</h2>
-This script runs the RF (random forest) algorithm on yeast species' KEGG gene expression using survival at temperature 37+ as environmental factor. We first perform RF without any tuning, then perform undersampling to improve OOB err rate. 
+This script runs the RF (random forest) algorithm on yeast species' KEGG gene expression using survival at temperature 37+ as environmental factor. We first perform RF without any tuning, then perform under sampling to improve OOB err rate. 
 <br />
 <br />
 
-- First, read files that contains all tAI values (codom optimization values) and the kegg annotation stored in "eTAI_kegg_wide.txt" and the file with temperature information stored in "thirtyseven_data.txt"
+- First, read files that contains all tAI values (codon optimization values) and the kegg annotation stored in "eTAI_kegg_wide.txt" and the file with temperature information stored in "thirtyseven_data.txt"
 <br />
 
 ```ruby
@@ -105,7 +105,7 @@ varImpPlot(rf,
 
 <br/>
 
-- Since the oob error is too high (~0.75 for testing set), we are going to perform undersampling to balance the data set. Once undersampling is completed, perform RF again on the balanced data set:
+- Since the oob error is too high (~0.75 for testing set), we are going to perform under sampling to balance the data set. Once under sampling is completed, perform RF again on the balanced data set:
 
 <br/>
 
@@ -157,7 +157,7 @@ for(j in 1:100){
 
 <br/>
 
-- We then pass the 100 non-repeated seed values to the function set.seed() and run the RF algorithm after downsampling the dataset. Note that here, we are using the tuneRF function which searches for the optimal mtry value and setting doBest = TRUE to run the RF with the optimal mtry found.
+- We then pass the 100 non-repeated seed values to the function set.seed() and run the RF algorithm after down sampling the dataset. Note that here, we are using the tuneRF function which searches for the optimal mtry value and setting doBest = TRUE to run the RF with the optimal mtry found.
 
 <br/>
 
@@ -171,7 +171,7 @@ for(j in 1:100){
 <br/>
 
 <h2>🦠 RF_resistance.Rmd Walk-Through</h2>
-This script is very similar to both RF_loop and RF_temp. It performs undersampling, loops through RF 100 times using the optimal mtry found by tuneRF, but the environmental (factor) variable changed from survival at temperature 37 to resistance-related characteristic. 
+This script is very similar to both RF_loop and RF_temp. It performs under sampling, loops through RF 100 times using the optimal mtry found by tuneRF, but the environmental (factor) variable changed from survival at temperature 37 to resistance-related characteristic. 
 
 <br/>
 
@@ -181,7 +181,7 @@ env <- read.delim("resistance.txt",header = T)
 <br/>
 
 <h2>🦠 KEGG_leave_out Walk-Through.Rmd Walk-Through</h2>
-This script performs a "leave out" analysis, which uses a while-loop that only stops the loop when the resulting OOB error rate is less than 50%. In each loop iteration, the most important KEGG value (judged on MeanDecreaseAccuracy rank) is taken out of the balanced training & testing data frame and concatenated to a data frame called "kegg_left_out". The script returns the list of KEGGs that have the highest value in predicting a yeast specie's possiblity of survival in temperature 37+. 
+This script performs a "leave out" analysis, which uses a while-loop that only stops the loop when the resulting OOB error rate is less than 50%. In each loop iteration, the most important KEGG value (judged on MeanDecreaseAccuracy rank) is taken out of the balanced training & testing data frame and concatenated to a data frame called "kegg_left_out". The script returns the list of KEGGs that have the highest value in predicting a yeast specie's possibility of survival in temperature 37+. 
 <br/>
 <br/>
 

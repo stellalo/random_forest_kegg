@@ -3,13 +3,6 @@
 <h2>👩🏻‍💻 Description</h2>
 This repository contains scripts that analyze 3177 KEGG gene expression data of 1154 yeast species using ML algorithm Random Forest in R Markdown. The objective of this project is to identify the KEGGs that have the highest possibility of predicting pathogenic yeast using different characteristics such as survival at temperature 37 Celsius and resistance to 9 anti-fungal treatments.
 <br />
-Algorithm visualization:
-<br />
-
-<div style="width:60px ; height:60px">
-![RF algorithm visualization](https://github.com/stellalo/random_forest_kegg/assets/89308696/396d1a5e-21e4-4f64-b093-b55019dcacd0)
-<div>
-
 
 <h2>🪐 Language and Packages</h2>
 
